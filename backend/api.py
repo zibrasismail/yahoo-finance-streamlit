@@ -186,7 +186,7 @@ async def scrape_options(symbol: str, date: str):
     # REQUIRED for Docker: Use /dev/shm workaround
     options.add_argument("--disable-dev-shm-usage")
     
-    # Performance and stability flags
+    # Performance and stability flags for Docker
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-software-rasterizer")
     options.add_argument("--disable-extensions")
@@ -194,8 +194,6 @@ async def scrape_options(symbol: str, date: str):
     options.add_argument("--disable-sync")
     options.add_argument("--disable-translate")
     options.add_argument("--disable-features=VizDisplayCompositor")
-    options.add_argument("--no-first-run")
-    options.add_argument("--no-default-browser-check")
     options.add_argument("--single-process")
     options.add_argument("--window-size=1920,1080")
     
