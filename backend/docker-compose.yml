@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   barchart-api:
     build: .
@@ -9,7 +7,21 @@ services:
     restart: unless-stopped
     environment:
       - TZ=UTC
-    # Chrome needs these for headless mode
+      - PYTHONUNBUFFERED=1
+    # Chrome needs extra shared memory
     shm_size: '2gb'
+    # Security options for Chrome
     security_opt:
       - seccomp:unconfined
+    # Resource limits (adjust based on your VPS)
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
