@@ -195,7 +195,9 @@ async def scrape_options(symbol: str, date: str):
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-background-networking")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("--remote-debugging-port=0")
+    
+    # Disable dbus to prevent container errors
+    options.add_argument("--disable-features=dbus")
     
     # Anti-detection flags
     options.add_argument("--disable-blink-features=AutomationControlled")
