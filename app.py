@@ -23,6 +23,10 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import yfinance as yf
 from streamlit_autorefresh import st_autorefresh
+import hashlib
+
+# Cache TTL in seconds (5 minutes = 300 seconds)
+CACHE_TTL = 300
 
 # Page configuration
 st.set_page_config(
@@ -195,63 +199,99 @@ if 'ticker_list' not in st.session_state:
     st.session_state.ticker_list = ['AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN']
 
 
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def get_stock_data(ticker: str) -> dict:
-    """Fetch real-time stock data using yfinance."""
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        hist = stock.history(period="5d", interval="1m")
-        
-        # Get current price and changes
-        current_price = info.get('currentPrice') or info.get('regularMarketPrice', 0)
-        prev_close = info.get('previousClose', current_price)
-        change = current_price - prev_close
-        change_pct = (change / prev_close * 100) if prev_close else 0
-        
-        return {
-            'ticker': ticker,
-            'name': info.get('shortName', ticker),
-            'price': current_price,
-            'change': change,
-            'change_pct': change_pct,
-            'open': info.get('open', 0),
-            'high': info.get('dayHigh', 0),
-            'low': info.get('dayLow', 0),
-            'volume': info.get('volume', 0),
-            'market_cap': info.get('marketCap', 0),
-            'pe_ratio': info.get('trailingPE', 0),
-            'week_52_high': info.get('fiftyTwoWeekHigh', 0),
-            'week_52_low': info.get('fiftyTwoWeekLow', 0),
-            'history': hist,
-            'timestamp': datetime.now()
-        }
-    except Exception as e:
-        st.error(f"Error fetching data for {ticker}: {e}")
-        return None
+    """Fetch real-time stock data using yfinance with caching and retry logic."""
+    import time as time_module
+    
+    max_retries = 3
+    retry_delay = 2  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            
+            # Check if we got valid data
+            if not info or info.get('regularMarketPrice') is None and info.get('currentPrice') is None:
+                if attempt < max_retries - 1:
+                    time_module.sleep(retry_delay * (attempt + 1))
+                    continue
+                return None
+            
+            hist = stock.history(period="5d", interval="1m")
+            
+            # Get current price and changes
+            current_price = info.get('currentPrice') or info.get('regularMarketPrice', 0)
+            prev_close = info.get('previousClose', current_price)
+            change = current_price - prev_close
+            change_pct = (change / prev_close * 100) if prev_close else 0
+            
+            return {
+                'ticker': ticker,
+                'name': info.get('shortName', ticker),
+                'price': current_price,
+                'change': change,
+                'change_pct': change_pct,
+                'open': info.get('open', 0),
+                'high': info.get('dayHigh', 0),
+                'low': info.get('dayLow', 0),
+                'volume': info.get('volume', 0),
+                'market_cap': info.get('marketCap', 0),
+                'pe_ratio': info.get('trailingPE', 0),
+                'week_52_high': info.get('fiftyTwoWeekHigh', 0),
+                'week_52_low': info.get('fiftyTwoWeekLow', 0),
+                'history': hist,
+                'timestamp': datetime.now()
+            }
+        except Exception as e:
+            error_msg = str(e).lower()
+            if 'rate' in error_msg or 'too many' in error_msg or '429' in error_msg:
+                if attempt < max_retries - 1:
+                    time_module.sleep(retry_delay * (attempt + 1))
+                    continue
+            st.error(f"Error fetching data for {ticker}: {e}")
+            return None
+    
+    return None
 
 
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def get_options_data(ticker: str) -> tuple:
-    """Fetch options chain data using yfinance."""
-    try:
-        stock = yf.Ticker(ticker)
-        
-        # Get available expiration dates
-        expirations = stock.options
-        
-        if not expirations:
+    """Fetch options chain data using yfinance with caching and retry logic."""
+    import time as time_module
+    
+    max_retries = 3
+    retry_delay = 2  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            stock = yf.Ticker(ticker)
+            
+            # Get available expiration dates
+            expirations = stock.options
+            
+            if not expirations:
+                return None, None, []
+            
+            # Get the nearest expiration
+            nearest_exp = expirations[0]
+            opt = stock.option_chain(nearest_exp)
+            
+            calls_df = opt.calls.copy()
+            puts_df = opt.puts.copy()
+            
+            return calls_df, puts_df, expirations
+        except Exception as e:
+            error_msg = str(e).lower()
+            if 'rate' in error_msg or 'too many' in error_msg or '429' in error_msg:
+                if attempt < max_retries - 1:
+                    time_module.sleep(retry_delay * (attempt + 1))
+                    continue
+            st.error(f"Error fetching options for {ticker}: {e}")
             return None, None, []
-        
-        # Get the nearest expiration
-        nearest_exp = expirations[0]
-        opt = stock.option_chain(nearest_exp)
-        
-        calls_df = opt.calls.copy()
-        puts_df = opt.puts.copy()
-        
-        return calls_df, puts_df, expirations
-    except Exception as e:
-        st.error(f"Error fetching options for {ticker}: {e}")
-        return None, None, []
+    
+    return None, None, []
 
 
 def create_price_chart(data: dict, ticker: str) -> go.Figure:
@@ -466,8 +506,8 @@ def format_number(num):
 
 
 def main():
-    # Auto-refresh every 60 seconds (60000 milliseconds)
-    count = st_autorefresh(interval=60000, limit=None, key="stock_refresh")
+    # Auto-refresh every 5 minutes (300000 milliseconds) to avoid rate limiting
+    count = st_autorefresh(interval=300000, limit=None, key="stock_refresh")
     
     # Header
     st.markdown("""
