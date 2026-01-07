@@ -134,7 +134,7 @@ def fetch_options(symbol: str, date: str):
 
 
 def create_charts(df):
-    """Create visualization charts."""
+    """Create visualization charts - bar and line charts for Open Interest."""
     # Extract numeric values
     def parse_num(val):
         if pd.isna(val) or val == "": return 0
@@ -144,19 +144,22 @@ def create_charts(df):
     df["put_oi"] = df["Put OI"].apply(parse_num)
     df["strike_num"] = df["Strike"].apply(parse_num)
     
-    # Open Interest Chart
-    fig = make_subplots(rows=1, cols=2, subplot_titles=('📈 Calls OI', '📉 Puts OI'))
+    # Sort by strike for proper line chart display
+    df_sorted = df.sort_values("strike_num")
     
-    fig.add_trace(
-        go.Bar(x=df['strike_num'], y=df['call_oi'], name='Calls', marker_color='#00d775'),
+    # 1. Bar Chart - Open Interest by Strike (side by side)
+    bar_fig = make_subplots(rows=1, cols=2, subplot_titles=('📈 Calls OI (Bar)', '📉 Puts OI (Bar)'))
+    
+    bar_fig.add_trace(
+        go.Bar(x=df_sorted['strike_num'], y=df_sorted['call_oi'], name='Calls', marker_color='#00d775'),
         row=1, col=1
     )
-    fig.add_trace(
-        go.Bar(x=df['strike_num'], y=df['put_oi'], name='Puts', marker_color='#ff4757'),
+    bar_fig.add_trace(
+        go.Bar(x=df_sorted['strike_num'], y=df_sorted['put_oi'], name='Puts', marker_color='#ff4757'),
         row=1, col=2
     )
     
-    fig.update_layout(
+    bar_fig.update_layout(
         template='plotly_dark',
         paper_bgcolor='#1e2328',
         plot_bgcolor='#1e2328',
@@ -164,10 +167,66 @@ def create_charts(df):
         height=350,
         showlegend=False
     )
-    fig.update_xaxes(title_text="Strike", gridcolor='#3d4450')
-    fig.update_yaxes(title_text="Open Interest", gridcolor='#3d4450')
+    bar_fig.update_xaxes(title_text="Strike", gridcolor='#3d4450')
+    bar_fig.update_yaxes(title_text="Open Interest", gridcolor='#3d4450')
     
-    return fig
+    # 2. Line Chart - Call & Put OI on same chart
+    line_fig = go.Figure()
+    
+    line_fig.add_trace(go.Scatter(
+        x=df_sorted['strike_num'],
+        y=df_sorted['call_oi'],
+        mode='lines+markers',
+        name='Call OI',
+        line=dict(color='#00d775', width=2),
+        marker=dict(size=6, symbol='circle'),
+        hovertemplate='Strike: %{x}<br>Call OI: %{y:,.0f}<extra></extra>'
+    ))
+    
+    line_fig.add_trace(go.Scatter(
+        x=df_sorted['strike_num'],
+        y=df_sorted['put_oi'],
+        mode='lines+markers',
+        name='Put OI',
+        line=dict(color='#ff4757', width=2),
+        marker=dict(size=6, symbol='diamond'),
+        hovertemplate='Strike: %{x}<br>Put OI: %{y:,.0f}<extra></extra>'
+    ))
+    
+    line_fig.update_layout(
+        title=dict(
+            text='📊 Call vs Put Open Interest by Strike',
+            font=dict(size=16, color='white')
+        ),
+        template='plotly_dark',
+        paper_bgcolor='#1e2328',
+        plot_bgcolor='#1e2328',
+        font=dict(color='white'),
+        height=400,
+        xaxis=dict(
+            title='Strike Price',
+            gridcolor='#3d4450',
+            tickformat=','
+        ),
+        yaxis=dict(
+            title='Open Interest',
+            gridcolor='#3d4450',
+            tickformat=','
+        ),
+        legend=dict(
+            orientation='h',
+            yanchor='bottom',
+            y=1.02,
+            xanchor='center',
+            x=0.5,
+            bgcolor='rgba(30, 35, 40, 0.8)',
+            bordercolor='#3d4450',
+            borderwidth=1
+        ),
+        hovermode='x unified'
+    )
+    
+    return bar_fig, line_fig
 
 
 def main():
@@ -328,8 +387,15 @@ def main():
                     st.markdown(f"[📥 Direct API CSV]({API_BASE_URL}/options/csv?symbol={symbol}&date={date})")
             
             with tab2:
-                fig = create_charts(df)
-                st.plotly_chart(fig, use_container_width=True)
+                bar_fig, line_fig = create_charts(df)
+                
+                # Line chart first (main comparison chart)
+                st.subheader("📈 Open Interest Comparison")
+                st.plotly_chart(line_fig, use_container_width=True)
+                
+                # Bar charts below
+                st.subheader("📊 Open Interest Distribution")
+                st.plotly_chart(bar_fig, use_container_width=True)
                 
                 # Summary
                 def parse_num(val):
@@ -340,6 +406,7 @@ def main():
                 total_put_oi = sum(parse_num(v) for v in df["Put OI"])
                 pc_ratio = total_put_oi / total_call_oi if total_call_oi > 0 else 0
                 
+                st.subheader("📋 Summary Statistics")
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Total Call OI", f"{total_call_oi:,.0f}")
                 c2.metric("Total Put OI", f"{total_put_oi:,.0f}")
